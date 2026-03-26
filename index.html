@@ -3,63 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sensor Jari Interaktif</title>
+    <title>Sensor Jari Interaktif V2</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }
-        #status { position: fixed; top: 20px; left: 20px; color: white; z-index: 10; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; }
+        body { margin: 0; overflow: hidden; background: #000; }
+        video { position: fixed; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); }
+        canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; transform: scaleX(-1); z-index: 5; }
+        #status { position: fixed; top: 10px; left: 10px; color: yellow; z-index: 10; background: rgba(0,0,0,0.7); padding: 8px; border-radius: 5px; font-size: 14px; }
     </style>
 </head>
 <body>
 
-<div id="status">Status: Menunggu Kamera...</div>
-<canvas id="canvas"></canvas>
+<div id="status">Status: Menghubungkan Kamera...</div>
+<video id="input_video"></video>
+<canvas id="output_canvas"></canvas>
 
 <script>
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
     const statusDiv = document.getElementById('status');
 
-    let lastSpeech = "";
-    let isSpeaking = false;
+    let lastDetectedAction = "";
+    let detectionStartTime = 0;
+    const DELAY_TIME = 2000; // Tunggu 2 detik (2000ms) sebelum bicara
 
-    // Inisialisasi Suara
     const synth = window.speechSynthesis;
+
     function speak(text) {
-        if (synth.speaking || lastSpeech === text) return;
+        if (synth.speaking) return;
         const utter = new SpeechSynthesisUtterance(text);
         utter.lang = 'id-ID';
-        utter.onend = () => { isSpeaking = false; lastSpeech = ""; };
-        lastSpeech = text;
-        isSpeaking = true;
         synth.speak(utter);
     }
 
-    function setupCanvas() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+    function onResults(results) {
+        // Samakan ukuran canvas dengan jendela
+        canvasElement.width = window.innerWidth;
+        canvasElement.height = window.innerHeight;
+        
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        statusDiv.innerText = "Sensor Siap! Gerakkan Jari Anda";
+
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
+            
+            // Koordinat Ujung Jari
+            const thumb = landmarks[4];
+            const index = landmarks[8];
+            const middle = landmarks[12];
+            const pinky = landmarks[20];
+
+            // Deteksi Jari Terangkat
+            const isThumbUp = thumb.y < landmarks[3].y;
+            const isIndexUp = index.y < landmarks[6].y;
+            const isMiddleUp = middle.y < landmarks[10].y;
+            const isPinkyUp = pinky.y < landmarks[18].y;
+
+            let currentAction = "";
+            let color = "";
+            let text = "";
+
+            // Logika Prioritas
+            if (isIndexUp && isMiddleUp && !isPinkyUp) {
+                currentAction = "terimakasih"; color = "white"; text = "Terima kasih";
+            } else if (isPinkyUp && !isIndexUp) {
+                currentAction = "perkenalkan"; color = "yellow"; text = "Perkenalkan";
+            } else if (isThumbUp && !isIndexUp) {
+                currentAction = "aku"; color = "red"; text = "Aku";
+            } else if (isIndexUp && !isMiddleUp) {
+                currentAction = "nama"; color = "green"; text = "Nama";
+            }
+
+            if (currentAction !== "") {
+                // Gambar Sensor Visual
+                const activeFinger = currentAction === "terimakasih" ? index : 
+                                    (currentAction === "perkenalkan" ? pinky : 
+                                    (currentAction === "aku" ? thumb : index));
+
+                drawSensor(activeFinger.x * canvasElement.width, activeFinger.y * canvasElement.height, color, currentAction.toUpperCase());
+
+                // Logika Timer/Delay
+                if (lastDetectedAction === currentAction) {
+                    let timePassed = Date.now() - detectionStartTime;
+                    let timeLeft = Math.max(0, (DELAY_TIME - timePassed) / 1000);
+                    
+                    statusDiv.innerText = `Tahan jari... (${timeLeft.toFixed(1)}s)`;
+                    
+                    if (timePassed > DELAY_TIME) {
+                        speak(text);
+                        detectionStartTime = Date.now() + 5000; // Jeda 5 detik agar tidak spam
+                    }
+                } else {
+                    lastDetectedAction = currentAction;
+                    detectionStartTime = Date.now();
+                }
+            } else {
+                lastDetectedAction = "";
+            }
+        }
     }
-    window.addEventListener('resize', setupCanvas);
-    setupCanvas();
 
     function drawSensor(x, y, color, label) {
-        ctx.beginPath();
-        ctx.arc(x, y, 40, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 0.6;
-        ctx.fill();
-        ctx.strokeStyle = "white";
-        ctx.lineWidth = 5;
-        ctx.stroke();
+        canvasCtx.beginPath();
+        canvasCtx.arc(x, y, 50, 0, Math.PI * 2);
+        canvasCtx.fillStyle = color;
+        canvasCtx.globalAlpha = 0.5;
+        canvasCtx.fill();
+        canvasCtx.lineWidth = 8;
+        canvasCtx.strokeStyle = "white";
+        canvasCtx.stroke();
         
-        ctx.globalAlpha = 1.0;
-        ctx.fillStyle = "white";
-        ctx.font = "bold 20px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(label, x, y - 50);
+        canvasCtx.globalAlpha = 1.0;
+        canvasCtx.fillStyle = "white";
+        canvasCtx.font = "bold 25px Arial";
+        canvasCtx.textAlign = "center";
+        canvasCtx.fillText(label, x, y - 70);
     }
 
     const hands = new Hands({
@@ -72,54 +132,11 @@
         minDetectionConfidence: 0.7,
         minTrackingConfidence: 0.7
     });
+    hands.onResults(onResults);
 
-    hands.onResults((results) => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        statusDiv.innerText = "Sensor Aktif: Gerakkan Jari Anda";
-
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
-
-            // Titik Ujung Jari
-            const thumb = landmarks[4];  // Jempol
-            const index = landmarks[8];  // Telunjuk
-            const middle = landmarks[12]; // Tengah
-            const pinky = landmarks[20];  // Kelingking
-
-            // Cek apakah jari terangkat (y lebih kecil berarti lebih tinggi di layar)
-            const isThumbUp = thumb.y < landmarks[3].y;
-            const isIndexUp = index.y < landmarks[6].y;
-            const isMiddleUp = middle.y < landmarks[10].y;
-            const isPinkyUp = pinky.y < landmarks[18].y;
-
-            // Logika Sensor Berdasarkan Rumus
-            
-            // 1. Dua Jari (Telunjuk & Tengah) - TERIMAKASIH
-            if (isIndexUp && isMiddleUp && !isPinkyUp) {
-                drawSensor(index.x * canvas.width, index.y * canvas.height, "white", "TERIMAKASIH");
-                speak("Terima kasih");
-            } 
-            // 2. Jari Kelingking - PERKENALKAN
-            else if (isPinkyUp && !isIndexUp && !isMiddleUp) {
-                drawSensor(pinky.x * canvas.width, pinky.y * canvas.height, "yellow", "PERKENALKAN");
-                speak("Perkenalkan");
-            }
-            // 3. Jari Jempol - AKU
-            else if (isThumbUp && !isIndexUp && !isMiddleUp) {
-                drawSensor(thumb.x * canvas.width, thumb.y * canvas.height, "red", "AKU");
-                speak("Aku");
-            }
-            // 4. Jari Telunjuk - NAMA
-            else if (isIndexUp && !isMiddleUp) {
-                drawSensor(index.x * canvas.width, index.y * canvas.height, "green", "NAMA");
-                speak("Nama");
-            }
-        }
-    });
-
-    const camera = new Camera(document.createElement('video'), {
+    const camera = new Camera(videoElement, {
         onFrame: async () => {
-            await hands.send({image: camera.video});
+            await hands.send({image: videoElement});
         },
         width: 1280,
         height: 720
